@@ -1,0 +1,36 @@
+# Apple and device-specific proprietary inputs
+*.ipsw
+ipsw-*.zip
+*.im4p
+*.im4m
+*.dmg
+*.trustcache
+*.macho
+*.img
+*.bin
+*.mbn
+*.fd
+*.efi
+*.key
+*.p12
+*.mobileprovision
+owner-policy/
+systemos-policy/
+inputs/
+secrets/
+device-backups/
+
+# Build output and local repositories
+out/
+build/
+stage/
+work/
+nabu-bootstrap-build/
+UniXNU/
+UniXNU-build/
+UniXNU-nabu/
+*.log
+*.tar
+*.tar.gz
+.DS_Store
+__pycache__/
