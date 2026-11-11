@@ -40,9 +40,23 @@ A local build may be resumed **after** `prepare_source.py` succeeded:
 cd ~/unixnu-nabu-work
 export UNIXNU_IPSW="$PWD/inputs/ipsw-21h16-small.zip"
 export UNIXNU_DEVICE="$PWD/nabu-bootstrap-build/device"
+./unixnu-nabu-macos/scripts/restore-bootstrap-patches.sh "$PWD"
 cd UniXNU-build
 ./unixnu defconfig nabu_bootstrap_defconfig
 ./unixnu build kernel
+```
+
+The restore step is required because UniXNU's tree assembler links the Nabu
+device's `patches/xnu` directory over the core directory. It merges the full
+pinned core patch set, installs the qualified component-probe override without
+duplicating Nabu's console patches, and moves aside an incomplete bootstrap
+record when `link.filelist` was never produced.
+
+Latest verified host build (2026-11-12):
+
+```text
+out/nabu/kernel/kernel.macho
+sha256 eb33b2c23104488636e0049a82e7f1a7a6328a7d382d8d92e25894f7df8a4357
 ```
 
 Do not run `nabu-build.sh` repeatedly against a modified upstream tree. Recreate a clean pinned worktree before a fresh full pipeline.

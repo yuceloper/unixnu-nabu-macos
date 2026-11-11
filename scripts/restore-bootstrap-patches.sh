@@ -1,60 +1,62 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Restore selected UniXNU core XNU build-compatibility patches to an already
-# staged Nabu bootstrap source tree. This touches no tablet partitions.
+# Merge UniXNU's core XNU patches into the staged Nabu patch module. The tree
+# assembler links patches/xnu to the device repository, so without this merge
+# the device patch directory hides the core patch directory completely.
+# This script only changes host-side source/build files; it never accesses the
+# tablet, its partitions, or its ESP.
 WORK_ROOT="${1:-$HOME/unixnu-nabu-work}"
 UPSTREAM="$WORK_ROOT/UniXNU-build"
 TREE="$UPSTREAM/out/nabu/tree"
 PATCH_DIR="$TREE/patches/xnu"
 XNU_WORK="$TREE/.cache/xnu-work"
+REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+OVERRIDE_DIR="$REPO_ROOT/patches/xnu"
 EXPECTED="245aca1a9ec5b730b1cad80fade295800d2981f1"
 
 if [[ "$(git -C "$UPSTREAM" rev-parse HEAD)" != "$EXPECTED" ]]; then
   echo "ERROR: UniXNU checkout is not the pinned $EXPECTED" >&2
   exit 1
 fi
-if [[ ! -d "$XNU_WORK/.git" || ! -d "$PATCH_DIR" ]]; then
-  echo "ERROR: staged Nabu tree / XNU work checkout not found" >&2
+if [[ ! -d "$PATCH_DIR" ]]; then
+  echo "ERROR: staged Nabu patch directory not found: $PATCH_DIR" >&2
   exit 1
 fi
 
-patches=(
-  kernel-sdk-root.patch
-  non-apple-pmap-field.patch
-  public-entitlements-header.patch
-)
-for name in "${patches[@]}"; do
-  src="$UPSTREAM/patches/xnu/$name"
+copied=0
+for src in "$UPSTREAM"/patches/xnu/*.patch; do
+  name=${src##*/}
   dst="$PATCH_DIR/$name"
-  if [[ ! -f "$src" ]]; then
-    echo "ERROR: missing upstream patch $src" >&2
+  override="$OVERRIDE_DIR/$name"
+  wanted="$src"
+  [[ -f "$override" ]] && wanted="$override"
+
+  if [[ -e "$dst" ]] && cmp -s "$wanted" "$dst"; then
+    continue
+  fi
+  if [[ -e "$dst" && ! -f "$override" ]]; then
+    echo "ERROR: staged patch conflicts with pinned core patch: $dst" >&2
     exit 1
   fi
-  if [[ -e "$dst" ]]; then
-    if ! cmp -s "$src" "$dst"; then
-      echo "ERROR: existing staged patch differs: $dst" >&2
-      exit 1
-    fi
-    echo "Already staged: $name"
-  else
-    # Since the staging folder may be symlinked to a local scratch directory,
-    # write the file only after proving no conflicting path exists.
-    cp "$src" "$dst"
-    echo "Staged: $name"
-  fi
+  cp "$wanted" "$dst"
+  echo "Staged core patch: $name"
+  copied=$((copied + 1))
 done
 
-echo "Checking patch applicability against current XNU work tree..."
-for name in "${patches[@]}"; do
-  p="$PATCH_DIR/$name"
-  if git -C "$XNU_WORK" apply --reverse --check "$p" >/dev/null 2>&1; then
-    echo "Already applied: $name"
-  elif git -C "$XNU_WORK" apply --check "$p" >/dev/null 2>&1; then
-    echo "Ready: $name"
-  else
-    echo "WARNING: $name cannot be applied in current work tree; inspect before rebuilding." >&2
-    exit 2
-  fi
-done
-echo "Patch checks passed. Run ./unixnu build kernel separately."
+# A failed compile can leave startup.o.json without link.filelist. kernel.py
+# otherwise treats that partial record as a completed bootstrap and skips
+# straight to the archive builders, which then fail with a misleading error.
+record="$TREE/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/startup.o.json"
+filelist="$TREE/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/link.filelist"
+if [[ -f "$record" && ! -f "$filelist" ]]; then
+  stale="$record.stale-before-bootstrap-retry"
+  [[ ! -e "$stale" ]] || stale="$stale.$$"
+  mv "$record" "$stale"
+  echo "Moved incomplete bootstrap record aside: $stale"
+fi
+
+if [[ -d "$XNU_WORK/.git" ]]; then
+  echo "XNU work tree exists; the build script will apply/check the merged series."
+fi
+echo "Ready: merged $copied patch file(s). Run ./unixnu build kernel."
